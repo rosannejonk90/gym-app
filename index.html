@@ -205,19 +205,18 @@
 
   .stepper-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 0;}
   .stepper-label{font-size:13px;color:var(--text-muted);font-weight:600;min-width:52px;}
-  .stepper{display:flex;align-items:center;gap:14px;}
-  .stepper button{
-    width:40px;height:40px;border-radius:50%;border:1px solid var(--border);
-    background:var(--bg);color:var(--accent-ink);
-    font-size:19px;font-weight:700;cursor:pointer;
-    display:flex;align-items:center;justify-content:center;
-    line-height:1;
+  .num-field{display:flex;align-items:center;gap:8px;}
+  .num-input{
+    width:88px;text-align:center;font-variant-numeric:tabular-nums;
+    font-size:16px;font-weight:700;color:var(--text);
+    border:1px solid var(--border);border-radius:10px;
+    background:var(--bg);padding:9px 6px;
+    -moz-appearance:textfield;appearance:textfield;
   }
-  .stepper button:active{background:var(--accent-soft);}
-  .stepper .val{
-    min-width:64px;text-align:center;font-variant-numeric:tabular-nums;
-    font-size:17px;font-weight:700;
-  }
+  .num-input:focus{outline:none;border-color:var(--accent);}
+  .num-input::-webkit-inner-spin-button,
+  .num-input::-webkit-outer-spin-button{-webkit-appearance:none;margin:0;}
+  .num-unit{font-size:13px;color:var(--text-muted);font-weight:600;}
 
   .sets-row{display:flex;gap:10px;padding-top:6px;flex-wrap:wrap;}
   .set-dot{
@@ -628,18 +627,15 @@
         '<p class="ex-prev">' + prevLine + '</p>' +
         '<div class="stepper-row">' +
           '<span class="stepper-label">Gewicht</span>' +
-          '<div class="stepper">' +
-            '<button type="button" data-act="dec-w" data-ex="' + i + '">–</button>' +
-            '<span class="val" id="w-' + i + '">' + startW + ' kg</span>' +
-            '<button type="button" data-act="inc-w" data-ex="' + i + '">+</button>' +
+          '<div class="num-field">' +
+            '<input type="number" inputmode="decimal" step="0.25" class="num-input" data-role="w" data-ex="' + i + '" id="w-' + i + '" value="' + startW + '">' +
+            '<span class="num-unit">kg</span>' +
           '</div>' +
         '</div>' +
         '<div class="stepper-row">' +
           '<span class="stepper-label">Reps</span>' +
-          '<div class="stepper">' +
-            '<button type="button" data-act="dec-r" data-ex="' + i + '">–</button>' +
-            '<span class="val" id="r-' + i + '">' + startR + '</span>' +
-            '<button type="button" data-act="inc-r" data-ex="' + i + '">+</button>' +
+          '<div class="num-field">' +
+            '<input type="number" inputmode="numeric" step="1" class="num-input" data-role="r" data-ex="' + i + '" id="r-' + i + '" value="' + startR + '">' +
           '</div>' +
         '</div>' +
         '<div class="sets-row">' + setsHtml + '</div>';
@@ -649,24 +645,23 @@
   }
 
   exerciseListEl.addEventListener('click', function(e){
-    var btn = e.target.closest('[data-act]');
-    if (btn){
-      var idx = btn.dataset.ex;
-      var st = trainingState[idx];
-      if (btn.dataset.act === 'inc-w') st.w = Math.round((st.w + 1.25) * 100) / 100;
-      if (btn.dataset.act === 'dec-w') st.w = Math.max(0, Math.round((st.w - 1.25) * 100) / 100);
-      if (btn.dataset.act === 'inc-r') st.r += 1;
-      if (btn.dataset.act === 'dec-r') st.r = Math.max(0, st.r - 1);
-      document.getElementById('w-' + idx).textContent = st.w + ' kg';
-      document.getElementById('r-' + idx).textContent = st.r;
-      return;
-    }
     var dot = e.target.closest('.set-dot');
     if (dot){
       dot.classList.toggle('done');
       var i = dot.dataset.ex, s = dot.dataset.set;
       trainingState[i].done[s] = dot.classList.contains('done');
     }
+  });
+
+  exerciseListEl.addEventListener('input', function(e){
+    var inp = e.target.closest('.num-input');
+    if (!inp) return;
+    var idx = inp.dataset.ex;
+    var st = trainingState[idx];
+    var num = parseFloat(inp.value);
+    if (isNaN(num)) num = 0;
+    if (inp.dataset.role === 'w') st.w = Math.max(0, num);
+    if (inp.dataset.role === 'r') st.r = Math.max(0, num);
   });
 
   document.getElementById('saveTrainingBtn').addEventListener('click', function(){
