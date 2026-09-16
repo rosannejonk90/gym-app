@@ -234,9 +234,10 @@
   }
 
   .save-bar{
-    position:sticky;bottom:0;
-    background:linear-gradient(to top, var(--bg) 60%, transparent);
-    padding:14px 0 4px;margin-top:4px;
+    flex-shrink:0;
+    background:var(--bg);
+    border-top:1px solid var(--border);
+    padding:14px 20px 10px;
   }
   .btn-save{
     width:100%;appearance:none;border:none;cursor:pointer;
@@ -394,9 +395,6 @@
     <!-- TRAINING -->
     <section class="screen" id="screen-training">
       <div class="stack" id="exerciseList"></div>
-      <div class="save-bar">
-        <button class="btn-save" id="saveTrainingBtn">Training opslaan</button>
-      </div>
     </section>
 
     <!-- HISTORIE -->
@@ -438,6 +436,7 @@
             <button type="button" class="btn-secondary" id="cancelMeasurementBtn" style="flex:1;">Annuleren</button>
             <button type="button" class="btn-save" id="saveMeasurementBtn" style="flex:1;">Opslaan</button>
           </div>
+          <div id="measurementDeleteZone" style="margin-top:12px;text-align:center;"></div>
         </div>
 
         <div class="stack" id="measurementSummary"></div>
@@ -456,6 +455,10 @@
     </section>
 
   </main>
+
+  <div class="save-bar" id="trainingSaveBar" style="display:none;">
+    <button class="btn-save" id="saveTrainingBtn">Training opslaan</button>
+  </div>
 
   <nav class="bottomnav" id="bottomnav">
     <button class="navbtn active" data-nav="home">
@@ -600,6 +603,7 @@
     document.getElementById('screenEyebrow').textContent = t.eyebrow;
     document.getElementById('screenTitle').textContent = t.title;
     document.querySelector('.screens').scrollTop = 0;
+    document.getElementById('trainingSaveBar').style.display = (name === 'training') ? 'block' : 'none';
   }
   document.addEventListener('click', function(e){
     var el = e.target.closest('[data-nav]');
@@ -738,6 +742,7 @@
 
   // ---------- Historie ----------
   var editingSessionIndex = null; // index in history die nu bewerkt wordt, of null
+  var deleteSessionConfirmIndex = null; // index waarvoor net op "verwijderen" is getikt
 
   function renderHistorie(){
     var el = document.getElementById('historieList');
@@ -779,6 +784,13 @@
         html += '<div class="hist-edit-actions">' +
           '<button type="button" class="btn-secondary" data-cancel-session="' + i + '" style="flex:1;">Annuleren</button>' +
           '<button type="button" class="btn-save" data-save-session="' + i + '" style="flex:1;">Opslaan</button>' +
+        '</div>' +
+        '<div style="margin-top:12px;text-align:center;">' +
+          (deleteSessionConfirmIndex === i
+            ? '<span class="small muted">Weet je het zeker? </span>' +
+              '<button type="button" class="link-btn" data-confirm-delete-session="' + i + '">Ja, verwijderen</button>' +
+              ' &nbsp; <button type="button" class="link-btn" data-cancel-delete-session="1" style="color:var(--text-muted);">Nee</button>'
+            : '<button type="button" class="link-btn" data-ask-delete-session="' + i + '" style="color:var(--text-muted);text-decoration:underline;">Training verwijderen</button>') +
         '</div>';
       } else {
         session.exercises.forEach(function(e){
@@ -795,12 +807,14 @@
     var editBtn = e.target.closest('[data-edit-session]');
     if (editBtn){
       editingSessionIndex = parseInt(editBtn.dataset.editSession, 10);
+      deleteSessionConfirmIndex = null;
       renderHistorie();
       return;
     }
     var cancelBtn = e.target.closest('[data-cancel-session]');
     if (cancelBtn){
       editingSessionIndex = null;
+      deleteSessionConfirmIndex = null;
       renderHistorie();
       return;
     }
@@ -819,9 +833,34 @@
       });
       saveJSON(HISTORY_KEY, history);
       editingSessionIndex = null;
+      deleteSessionConfirmIndex = null;
       renderHistorie();
       renderHome();
       toast('Training bijgewerkt ✓');
+      return;
+    }
+    var askDelBtn = e.target.closest('[data-ask-delete-session]');
+    if (askDelBtn){
+      deleteSessionConfirmIndex = parseInt(askDelBtn.dataset.askDeleteSession, 10);
+      renderHistorie();
+      return;
+    }
+    var cancelDelBtn = e.target.closest('[data-cancel-delete-session]');
+    if (cancelDelBtn){
+      deleteSessionConfirmIndex = null;
+      renderHistorie();
+      return;
+    }
+    var confirmDelBtn = e.target.closest('[data-confirm-delete-session]');
+    if (confirmDelBtn){
+      var di = parseInt(confirmDelBtn.dataset.confirmDeleteSession, 10);
+      history.splice(di, 1);
+      saveJSON(HISTORY_KEY, history);
+      editingSessionIndex = null;
+      deleteSessionConfirmIndex = null;
+      renderHistorie();
+      renderHome();
+      toast('Training verwijderd');
     }
   });
 
@@ -929,7 +968,21 @@
   var addMeasurementLabel = document.getElementById('addMeasurementLabel');
   var formOpen = false;
   var editingMeasurementIndex = null; // index in measurements die nu bewerkt wordt, of null
+  var deleteMeasurementConfirm = false;
   var measurementFormTitle = document.getElementById('measurementFormTitle');
+  var measurementDeleteZone = document.getElementById('measurementDeleteZone');
+
+  function renderMeasurementDeleteZone(){
+    if (editingMeasurementIndex === null){
+      measurementDeleteZone.innerHTML = '';
+      return;
+    }
+    measurementDeleteZone.innerHTML = deleteMeasurementConfirm
+      ? '<span class="small muted">Weet je het zeker? </span>' +
+        '<button type="button" class="link-btn" id="confirmDeleteMeasurementBtn">Ja, verwijderen</button>' +
+        ' &nbsp; <button type="button" class="link-btn" id="cancelDeleteMeasurementBtn" style="color:var(--text-muted);">Nee</button>'
+      : '<button type="button" class="link-btn" id="askDeleteMeasurementBtn" style="color:var(--text-muted);text-decoration:underline;">Meting verwijderen</button>';
+  }
 
   function setFormOpen(open){
     formOpen = open;
@@ -939,13 +992,16 @@
   }
   function resetMeasurementForm(){
     editingMeasurementIndex = null;
+    deleteMeasurementConfirm = false;
     measurementFormTitle.textContent = 'Nieuwe meting';
     document.getElementById('saveMeasurementBtn').textContent = 'Opslaan';
     ['mGewicht','mArmen','mBenen','mBuik','mBillen'].forEach(function(id){ document.getElementById(id).value = ''; });
+    renderMeasurementDeleteZone();
   }
   function openMeasurementFormForEdit(idx){
     var m = measurements[idx];
     editingMeasurementIndex = idx;
+    deleteMeasurementConfirm = false;
     measurementFormTitle.textContent = 'Meting bewerken';
     document.getElementById('saveMeasurementBtn').textContent = 'Wijzigingen opslaan';
     document.getElementById('mDate').value = m.date;
@@ -955,7 +1011,29 @@
     document.getElementById('mBuik').value = m.buik === null || m.buik === undefined ? '' : m.buik;
     document.getElementById('mBillen').value = m.billen === null || m.billen === undefined ? '' : m.billen;
     setFormOpen(true);
+    renderMeasurementDeleteZone();
   }
+  measurementDeleteZone.addEventListener('click', function(e){
+    if (e.target.closest('#askDeleteMeasurementBtn')){
+      deleteMeasurementConfirm = true;
+      renderMeasurementDeleteZone();
+      return;
+    }
+    if (e.target.closest('#cancelDeleteMeasurementBtn')){
+      deleteMeasurementConfirm = false;
+      renderMeasurementDeleteZone();
+      return;
+    }
+    if (e.target.closest('#confirmDeleteMeasurementBtn')){
+      measurements.splice(editingMeasurementIndex, 1);
+      saveJSON(MEASURE_KEY, measurements);
+      setFormOpen(false);
+      resetMeasurementForm();
+      renderVoortgang();
+      renderHome();
+      toast('Meting verwijderd');
+    }
+  });
   document.getElementById('addMeasurementBtn').addEventListener('click', function(){
     if (formOpen){
       setFormOpen(false);
