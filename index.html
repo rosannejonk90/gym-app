@@ -50,8 +50,12 @@
   }
 
   *{box-sizing:border-box;}
+  html{background:var(--bg);height:100%;overflow:hidden;}
   body{
     margin:0;
+    height:100%;
+    overflow:hidden;
+    overscroll-behavior:none;
     background:var(--bg);
     color:var(--text);
     font-family:"Manrope",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
@@ -99,7 +103,7 @@
   }
 
   .topbar{
-    padding:22px 22px 16px;
+    padding:calc(22px + env(safe-area-inset-top)) 22px 16px;
     flex-shrink:0;
   }
   .topbar .eyebrow{
@@ -120,10 +124,10 @@
     padding:4px 20px 28px;
     -webkit-overflow-scrolling:touch;
   }
-  /* extra ruimte onderin zodra een tekstveld actief is, zodat een knop
-     onder een formulier (zoals "Opslaan") niet verstopt raakt achter
-     het toetsenbord op iPhone */
-  .screens.kb-open{ padding-bottom:48vh; }
+  /* de exacte extra ruimte onderin (zodra een tekstveld actief is) wordt
+     via JavaScript ingesteld op basis van de echte toetsenbordhoogte,
+     zodat een knop onder een formulier (zoals "Opslaan") precies boven
+     het toetsenbord blijft staan in plaats van midden in beeld te zweven */
   .screen{display:none;}
   .screen.active{display:block;}
 
@@ -243,9 +247,16 @@
   .btn-save:active{transform:scale(.99);}
 
   /* HISTORIE */
+  .hist-card-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px;}
   .hist-card .hist-date{
     font-family:"Fraunces",serif;font-size:16.5px;font-weight:600;
     text-transform:capitalize;margin-bottom:10px;
+  }
+  .hist-card-head .hist-date{margin-bottom:0;}
+  .hist-edit-btn{
+    background:none;border:none;color:var(--accent-ink);
+    font-size:12.5px;font-weight:700;cursor:pointer;
+    padding:5px 4px;flex-shrink:0;
   }
   .hist-row{
     display:flex;justify-content:space-between;gap:10px;
@@ -254,6 +265,16 @@
   .hist-row:first-of-type{border-top:none;}
   .hist-ex{color:var(--text);font-weight:600;}
   .hist-vals{color:var(--text-muted);font-variant-numeric:tabular-nums;white-space:nowrap;}
+
+  .hist-row-edit{
+    display:flex;flex-direction:column;gap:8px;
+    padding:10px 0;border-top:1px solid var(--border);
+  }
+  .hist-row-edit:first-of-type{border-top:none;}
+  .hist-edit-name{font-size:13.5px;font-weight:600;color:var(--text);}
+  .hist-edit-fields{display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
+  .num-input-sm{width:56px;padding:8px 2px;font-size:16px;}
+  .hist-edit-actions{display:flex;gap:10px;margin-top:2px;}
 
   /* SCHEMA */
   .schema-card{display:flex;justify-content:space-between;align-items:center;gap:12px;}
@@ -392,7 +413,7 @@
         </button>
 
         <div class="card" id="measurementForm" style="display:none;">
-          <p class="card-title">Nieuwe meting</p>
+          <p class="card-title" id="measurementFormTitle">Nieuwe meting</p>
           <div class="form-grid">
             <label style="grid-column:1 / -1;">Datum
               <input type="date" id="mDate">
@@ -716,6 +737,8 @@
   }
 
   // ---------- Historie ----------
+  var editingSessionIndex = null; // index in history die nu bewerkt wordt, of null
+
   function renderHistorie(){
     var el = document.getElementById('historieList');
     if (!history.length){
@@ -731,15 +754,76 @@
     var html = '';
     for (var i = history.length - 1; i >= 0; i--){
       var session = history[i];
-      html += '<div class="card hist-card"><div class="hist-date">' + formatDateNL(session.date) + '</div>';
-      session.exercises.forEach(function(e){
-        html += '<div class="hist-row"><span class="hist-ex">' + escapeHtml(e.name) + '</span>' +
-          '<span class="hist-vals">' + e.weight + ' kg × ' + e.reps + ' · ' + e.setsDone + '/' + e.setsTarget + ' sets</span></div>';
-      });
+      var isEditing = editingSessionIndex === i;
+      html += '<div class="card hist-card">' +
+        '<div class="hist-card-head"><div class="hist-date">' + formatDateNL(session.date) + '</div>' +
+        (isEditing
+          ? ''
+          : '<button type="button" class="hist-edit-btn" data-edit-session="' + i + '">Bewerken</button>') +
+        '</div>';
+
+      if (isEditing){
+        session.exercises.forEach(function(e, ei){
+          html += '<div class="hist-row-edit">' +
+            '<span class="hist-edit-name">' + escapeHtml(e.name) + '</span>' +
+            '<div class="hist-edit-fields">' +
+              '<input type="number" inputmode="decimal" step="0.25" class="num-input num-input-sm" data-hf="w" data-si="' + i + '" data-ei="' + ei + '" value="' + e.weight + '">' +
+              '<span class="num-unit">kg</span>' +
+              '<input type="number" inputmode="numeric" step="1" class="num-input num-input-sm" data-hf="r" data-si="' + i + '" data-ei="' + ei + '" value="' + e.reps + '">' +
+              '<span class="num-unit">reps</span>' +
+              '<input type="number" inputmode="numeric" min="0" max="' + e.setsTarget + '" step="1" class="num-input num-input-sm" data-hf="s" data-si="' + i + '" data-ei="' + ei + '" value="' + e.setsDone + '">' +
+              '<span class="num-unit">/ ' + e.setsTarget + ' sets</span>' +
+            '</div>' +
+          '</div>';
+        });
+        html += '<div class="hist-edit-actions">' +
+          '<button type="button" class="btn-secondary" data-cancel-session="' + i + '" style="flex:1;">Annuleren</button>' +
+          '<button type="button" class="btn-save" data-save-session="' + i + '" style="flex:1;">Opslaan</button>' +
+        '</div>';
+      } else {
+        session.exercises.forEach(function(e){
+          html += '<div class="hist-row"><span class="hist-ex">' + escapeHtml(e.name) + '</span>' +
+            '<span class="hist-vals">' + e.weight + ' kg × ' + e.reps + ' · ' + e.setsDone + '/' + e.setsTarget + ' sets</span></div>';
+        });
+      }
       html += '</div>';
     }
     el.innerHTML = html;
   }
+
+  document.getElementById('historieList').addEventListener('click', function(e){
+    var editBtn = e.target.closest('[data-edit-session]');
+    if (editBtn){
+      editingSessionIndex = parseInt(editBtn.dataset.editSession, 10);
+      renderHistorie();
+      return;
+    }
+    var cancelBtn = e.target.closest('[data-cancel-session]');
+    if (cancelBtn){
+      editingSessionIndex = null;
+      renderHistorie();
+      return;
+    }
+    var saveBtn = e.target.closest('[data-save-session]');
+    if (saveBtn){
+      var si = parseInt(saveBtn.dataset.saveSession, 10);
+      var session = history[si];
+      var fields = document.querySelectorAll('[data-si="' + si + '"]');
+      fields.forEach(function(inp){
+        var ei = parseInt(inp.dataset.ei, 10);
+        var ex = session.exercises[ei];
+        var num = parseFloat(inp.value);
+        if (inp.dataset.hf === 'w' && !isNaN(num)) ex.weight = Math.max(0, num);
+        if (inp.dataset.hf === 'r' && !isNaN(num)) ex.reps = Math.max(0, num);
+        if (inp.dataset.hf === 's' && !isNaN(num)) ex.setsDone = Math.min(ex.setsTarget, Math.max(0, Math.round(num)));
+      });
+      saveJSON(HISTORY_KEY, history);
+      editingSessionIndex = null;
+      renderHistorie();
+      renderHome();
+      toast('Training bijgewerkt ✓');
+    }
+  });
 
   // ---------- Voortgang (lichaamsmaten) ----------
   var METRICS = [
@@ -797,7 +881,10 @@
     var first = measurements[0];
 
     var lastHtml =
-      '<div class="card"><p class="card-title">Laatste meting — ' + formatDateNL(last.date) + '</p>' +
+      '<div class="card"><div class="hist-card-head">' +
+      '<p class="card-title" style="margin:0;">Laatste meting — ' + formatDateNL(last.date) + '</p>' +
+      '<button type="button" class="hist-edit-btn" id="editLastMeasurementBtn">Bewerken</button>' +
+      '</div>' +
       '<div class="measure-grid">' +
         METRICS.map(function(m){
           return '<div class="measure-cell"><div class="measure-label">' + m.l + '</div><div class="measure-value">' + fmtVal(last[m.k], m.unit) + '</div></div>';
@@ -841,17 +928,52 @@
   var measurementForm = document.getElementById('measurementForm');
   var addMeasurementLabel = document.getElementById('addMeasurementLabel');
   var formOpen = false;
+  var editingMeasurementIndex = null; // index in measurements die nu bewerkt wordt, of null
+  var measurementFormTitle = document.getElementById('measurementFormTitle');
+
   function setFormOpen(open){
     formOpen = open;
     measurementForm.style.display = open ? 'block' : 'none';
     addMeasurementLabel.textContent = open ? 'Sluiten' : 'Nieuwe meting toevoegen';
-    if (open) document.getElementById('mDate').value = todayISO();
+    if (open && editingMeasurementIndex === null) document.getElementById('mDate').value = todayISO();
+  }
+  function resetMeasurementForm(){
+    editingMeasurementIndex = null;
+    measurementFormTitle.textContent = 'Nieuwe meting';
+    document.getElementById('saveMeasurementBtn').textContent = 'Opslaan';
+    ['mGewicht','mArmen','mBenen','mBuik','mBillen'].forEach(function(id){ document.getElementById(id).value = ''; });
+  }
+  function openMeasurementFormForEdit(idx){
+    var m = measurements[idx];
+    editingMeasurementIndex = idx;
+    measurementFormTitle.textContent = 'Meting bewerken';
+    document.getElementById('saveMeasurementBtn').textContent = 'Wijzigingen opslaan';
+    document.getElementById('mDate').value = m.date;
+    document.getElementById('mGewicht').value = m.gewicht === null || m.gewicht === undefined ? '' : m.gewicht;
+    document.getElementById('mArmen').value = m.armen === null || m.armen === undefined ? '' : m.armen;
+    document.getElementById('mBenen').value = m.benen === null || m.benen === undefined ? '' : m.benen;
+    document.getElementById('mBuik').value = m.buik === null || m.buik === undefined ? '' : m.buik;
+    document.getElementById('mBillen').value = m.billen === null || m.billen === undefined ? '' : m.billen;
+    setFormOpen(true);
   }
   document.getElementById('addMeasurementBtn').addEventListener('click', function(){
-    setFormOpen(!formOpen);
+    if (formOpen){
+      setFormOpen(false);
+      resetMeasurementForm();
+    } else {
+      resetMeasurementForm();
+      setFormOpen(true);
+    }
   });
   document.getElementById('cancelMeasurementBtn').addEventListener('click', function(){
     setFormOpen(false);
+    resetMeasurementForm();
+  });
+  document.getElementById('measurementSummary').addEventListener('click', function(e){
+    var btn = e.target.closest('#editLastMeasurementBtn');
+    if (btn){
+      openMeasurementFormForEdit(measurements.length - 1);
+    }
   });
   document.getElementById('saveMeasurementBtn').addEventListener('click', function(){
     var date = document.getElementById('mDate').value || todayISO();
@@ -868,12 +990,25 @@
       return;
     }
     METRICS.forEach(function(m){ if (isNaN(vals[m.k])) vals[m.k] = null; });
-    measurements.push({ date: date, gewicht: vals.gewicht, armen: vals.armen, benen: vals.benen, buik: vals.buik, billen: vals.billen });
-    measurements.sort(function(a, b){ return a.date < b.date ? -1 : a.date > b.date ? 1 : 0; });
-    saveJSON(MEASURE_KEY, measurements);
-    ['mGewicht','mArmen','mBenen','mBuik','mBillen'].forEach(function(id){ document.getElementById(id).value = ''; });
-    setFormOpen(false);
-    toast('Meting opgeslagen ✓');
+
+    if (editingMeasurementIndex !== null){
+      var existing = measurements[editingMeasurementIndex];
+      existing.date = date;
+      existing.gewicht = vals.gewicht; existing.armen = vals.armen; existing.benen = vals.benen;
+      existing.buik = vals.buik; existing.billen = vals.billen;
+      measurements.sort(function(a, b){ return a.date < b.date ? -1 : a.date > b.date ? 1 : 0; });
+      saveJSON(MEASURE_KEY, measurements);
+      setFormOpen(false);
+      resetMeasurementForm();
+      toast('Meting bijgewerkt ✓');
+    } else {
+      measurements.push({ date: date, gewicht: vals.gewicht, armen: vals.armen, benen: vals.benen, buik: vals.buik, billen: vals.billen });
+      measurements.sort(function(a, b){ return a.date < b.date ? -1 : a.date > b.date ? 1 : 0; });
+      saveJSON(MEASURE_KEY, measurements);
+      setFormOpen(false);
+      resetMeasurementForm();
+      toast('Meting opgeslagen ✓');
+    }
     renderVoortgang();
     renderHome();
   });
@@ -1042,27 +1177,47 @@
 
   // ---------- Toetsenbord: houd knoppen onder formulieren bereikbaar ----------
   // Op iPhone kan het toetsenbord een "Opslaan"-knop onderin een formulier
-  // bedekken. Zolang een tekstveld actief is maken we onderin extra ruimte
-  // en scrollen we het actieve veld in beeld, zodat je altijd bij de knop kunt.
+  // bedekken. We meten de echte hoogte van het toetsenbord (via visualViewport)
+  // en maken precies zoveel ruimte vrij als nodig — geen vaste, te grote
+  // lege ruimte die de knop midden in beeld laat "zweven".
   (function(){
     var screensEl = document.querySelector('.screens');
+    var activeInput = null;
+
+    function applyKeyboardSpace(){
+      if (!window.visualViewport) return;
+      var vv = window.visualViewport;
+      var kbHeight = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+      if (kbHeight > 80 && activeInput){
+        screensEl.style.paddingBottom = (kbHeight + 20) + 'px';
+        screensEl.classList.add('kb-open');
+        activeInput.scrollIntoView({ block:'nearest', behavior:'smooth' });
+      } else {
+        screensEl.style.paddingBottom = '';
+        screensEl.classList.remove('kb-open');
+      }
+    }
+
     document.addEventListener('focusin', function(e){
       if (e.target.matches('input')){
-        screensEl.classList.add('kb-open');
-        setTimeout(function(){
-          e.target.scrollIntoView({ block:'center', behavior:'smooth' });
-        }, 300);
+        activeInput = e.target;
+        setTimeout(applyKeyboardSpace, 250);
       }
     });
     document.addEventListener('focusout', function(e){
       if (e.target.matches('input')){
         setTimeout(function(){
           if (!document.activeElement || !document.activeElement.matches('input')){
+            activeInput = null;
+            screensEl.style.paddingBottom = '';
             screensEl.classList.remove('kb-open');
           }
         }, 150);
       }
     });
+    if (window.visualViewport){
+      window.visualViewport.addEventListener('resize', applyKeyboardSpace);
+    }
   })();
 
   // ---------- Start ----------
