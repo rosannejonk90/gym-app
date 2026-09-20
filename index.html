@@ -22,6 +22,8 @@
     --accent:#A63860;
     --accent-soft:#F7E8EE;
     --accent-ink:#7A2A48;
+    --cal-trained:#3FA772;
+    --cal-planned:#E8973A;
     --shadow: 0 1px 2px rgba(33,53,49,.04), 0 8px 24px -12px rgba(33,53,49,.18);
   }
   @media (prefers-color-scheme: dark){
@@ -34,6 +36,8 @@
       --accent:#D9678F;
       --accent-soft:rgba(217,103,143,.16);
       --accent-ink:#F3B4CD;
+      --cal-trained:#2E8158;
+      --cal-planned:#B97324;
       --shadow: 0 1px 2px rgba(0,0,0,.2), 0 10px 26px -14px rgba(0,0,0,.55);
     }
   }
@@ -46,6 +50,8 @@
     --accent:#D9678F;
     --accent-soft:rgba(217,103,143,.16);
     --accent-ink:#F3B4CD;
+    --cal-trained:#2E8158;
+    --cal-planned:#B97324;
     --shadow: 0 1px 2px rgba(0,0,0,.2), 0 10px 26px -14px rgba(0,0,0,.55);
   }
 
@@ -294,6 +300,27 @@
     font-weight:700;font-size:14.5px;padding:13px;border-radius:14px;
   }
 
+  /* KALENDER */
+  .cal-nav{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;}
+  .cal-month-label{font-family:"Fraunces",serif;font-size:16.5px;font-weight:600;text-transform:capitalize;}
+  .cal-weekdays{display:grid;grid-template-columns:repeat(7,1fr);text-align:center;margin-bottom:6px;}
+  .cal-weekdays span{font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.03em;}
+  .cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;}
+  .cal-day{
+    aspect-ratio:1;display:flex;align-items:center;justify-content:center;
+    border-radius:10px;font-size:13.5px;font-weight:600;color:var(--text);
+    background:var(--bg);cursor:pointer;position:relative;border:1.5px solid transparent;
+  }
+  .cal-day.cal-empty{visibility:hidden;cursor:default;}
+  .cal-day.cal-today{border-color:var(--accent);}
+  .cal-day.cal-trained{background:var(--cal-trained);color:#fff;}
+  .cal-day.cal-planned{background:var(--cal-planned);color:#fff;}
+  .cal-legend{display:flex;flex-direction:column;gap:6px;margin-top:14px;padding-top:12px;border-top:1px solid var(--border);}
+  .cal-legend-item{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--text-muted);}
+  .cal-dot{width:11px;height:11px;border-radius:50%;flex-shrink:0;}
+  .cal-dot-trained{background:var(--cal-trained);}
+  .cal-dot-planned{background:var(--cal-planned);}
+
   /* VOORTGANG */
   .form-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
   .form-grid label{display:flex;flex-direction:column;gap:6px;font-size:12.5px;font-weight:700;color:var(--text-muted);}
@@ -454,6 +481,32 @@
       </div>
     </section>
 
+    <!-- KALENDER -->
+    <section class="screen" id="screen-kalender">
+      <div class="stack">
+        <div class="card">
+          <div class="cal-nav">
+            <button type="button" class="icon-btn" id="calPrevBtn" aria-label="Vorige maand">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"/></svg>
+            </button>
+            <span id="calMonthLabel" class="cal-month-label">September 2026</span>
+            <button type="button" class="icon-btn" id="calNextBtn" aria-label="Volgende maand">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>
+            </button>
+          </div>
+          <div class="cal-weekdays">
+            <span>ma</span><span>di</span><span>wo</span><span>do</span><span>vr</span><span>za</span><span>zo</span>
+          </div>
+          <div class="cal-grid" id="calGrid"></div>
+          <div class="cal-legend">
+            <span class="cal-legend-item"><span class="cal-dot cal-dot-trained"></span>Getraind</span>
+            <span class="cal-legend-item"><span class="cal-dot cal-dot-planned"></span>Gepland — tik op een dag</span>
+          </div>
+        </div>
+        <div class="card" id="calWeekStat"></div>
+      </div>
+    </section>
+
   </main>
 
   <div class="save-bar" id="trainingSaveBar" style="display:none;">
@@ -481,6 +534,10 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><circle cx="15" cy="6" r="2"/><path d="M3 12h18"/><circle cx="9" cy="12" r="2"/><path d="M3 18h18"/><circle cx="17" cy="18" r="2"/></svg>
       <span>Schema</span>
     </button>
+    <button class="navbtn" data-nav="kalender">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="5" width="17" height="15" rx="2"/><path d="M3.5 9.5h17M8 3v4M16 3v4"/></svg>
+      <span>Kalender</span>
+    </button>
   </nav>
 
   <div class="toast" id="toast"></div>
@@ -492,6 +549,7 @@
   var SCHEMA_KEY = 'gymapp_schema_v1';
   var HISTORY_KEY = 'gymapp_history_v1';
   var MEASURE_KEY = 'gymapp_measurements_v1';
+  var PLANNED_KEY = 'gymapp_planned_v1';
 
   function loadJSON(key, fallback){
     try{
@@ -540,6 +598,7 @@
 
   var history = loadJSON(HISTORY_KEY, []);
   var measurements = loadJSON(MEASURE_KEY, []);
+  var planned = loadJSON(PLANNED_KEY, []);
 
   function findLastFor(ex){
     for (var i = history.length - 1; i >= 0; i--){
@@ -590,7 +649,8 @@
     training: { eyebrow:"Training", title:"Aan de slag" },
     historie: { eyebrow:"Terugblik", title:"Historie" },
     voortgang: { eyebrow:"Lichaam", title:"Voortgang" },
-    schema: { eyebrow:"Instellingen", title:"Mijn schema" }
+    schema: { eyebrow:"Instellingen", title:"Mijn schema" },
+    kalender: { eyebrow:"Overzicht", title:"Kalender" }
   };
   function goTo(name){
     document.querySelectorAll('.screen').forEach(function(s){
@@ -604,6 +664,7 @@
     document.getElementById('screenTitle').textContent = t.title;
     document.querySelector('.screens').scrollTop = 0;
     document.getElementById('trainingSaveBar').style.display = (name === 'training') ? 'block' : 'none';
+    if (name === 'kalender') renderKalender();
   }
   document.addEventListener('click', function(e){
     var el = e.target.closest('[data-nav]');
@@ -698,9 +759,12 @@
     });
     history.push(session);
     saveJSON(HISTORY_KEY, history);
+    var plannedIdx = planned.indexOf(session.date);
+    if (plannedIdx !== -1){ planned.splice(plannedIdx, 1); saveJSON(PLANNED_KEY, planned); }
     toast('Training opgeslagen ✓');
     renderHome();
     renderHistorie();
+    renderKalender();
     buildTrainingScreen();
     goTo('home');
   });
@@ -860,6 +924,7 @@
       deleteSessionConfirmIndex = null;
       renderHistorie();
       renderHome();
+      renderKalender();
       toast('Training verwijderd');
     }
   });
@@ -1298,9 +1363,76 @@
     }
   })();
 
+  // ---------- Kalender ----------
+  var calendarViewDate = new Date(); // maand die nu getoond wordt
+  var MONTH_NAMES_NL = ['januari','februari','maart','april','mei','juni','juli','augustus','september','oktober','november','december'];
+
+  function isoFromParts(y, m, d){
+    var mm = String(m + 1).padStart(2, '0');
+    var dd = String(d).padStart(2, '0');
+    return y + '-' + mm + '-' + dd;
+  }
+  function isTrainedDate(iso){
+    return history.some(function(s){ return s.date === iso; });
+  }
+  function isPlannedDate(iso){
+    return planned.indexOf(iso) !== -1;
+  }
+
+  function renderKalender(){
+    var y = calendarViewDate.getFullYear();
+    var m = calendarViewDate.getMonth();
+    document.getElementById('calMonthLabel').textContent = MONTH_NAMES_NL[m] + ' ' + y;
+
+    var firstOfMonth = new Date(y, m, 1);
+    var startOffset = (firstOfMonth.getDay() + 6) % 7; // maandag = 0
+    var daysInMonth = new Date(y, m + 1, 0).getDate();
+    var today = todayISO();
+
+    var html = '';
+    for (var i = 0; i < startOffset; i++){
+      html += '<div class="cal-day cal-empty"></div>';
+    }
+    for (var d = 1; d <= daysInMonth; d++){
+      var iso = isoFromParts(y, m, d);
+      var cls = 'cal-day';
+      if (iso === today) cls += ' cal-today';
+      if (isTrainedDate(iso)) cls += ' cal-trained';
+      else if (isPlannedDate(iso)) cls += ' cal-planned';
+      html += '<div class="' + cls + '" data-cal-day="' + iso + '">' + d + '</div>';
+    }
+    document.getElementById('calGrid').innerHTML = html;
+
+    var weekStart = startOfWeekISO();
+    var weekCount = history.filter(function(s){ return s.date >= weekStart; }).length;
+    document.getElementById('calWeekStat').innerHTML =
+      '<p class="card-title" style="margin:0 0 4px;">Deze week</p>' +
+      '<p style="margin:0;font-size:15px;">' + weekCount + ' training' + (weekCount === 1 ? '' : 'en') + ' afgerond</p>';
+  }
+
+  document.getElementById('calPrevBtn').addEventListener('click', function(){
+    calendarViewDate.setMonth(calendarViewDate.getMonth() - 1);
+    renderKalender();
+  });
+  document.getElementById('calNextBtn').addEventListener('click', function(){
+    calendarViewDate.setMonth(calendarViewDate.getMonth() + 1);
+    renderKalender();
+  });
+  document.getElementById('calGrid').addEventListener('click', function(e){
+    var cell = e.target.closest('[data-cal-day]');
+    if (!cell) return;
+    var iso = cell.dataset.calDay;
+    if (isTrainedDate(iso)) return; // al getraind — niet te (ont)plannen
+    var idx = planned.indexOf(iso);
+    if (idx === -1) planned.push(iso); else planned.splice(idx, 1);
+    saveJSON(PLANNED_KEY, planned);
+    renderKalender();
+  });
+
   // ---------- Start ----------
   buildTrainingScreen();
   buildSchemaScreen();
+  renderKalender();
   renderHome();
   renderHistorie();
   renderVoortgang();
