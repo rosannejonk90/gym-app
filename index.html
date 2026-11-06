@@ -300,6 +300,22 @@
     font-weight:700;font-size:14.5px;padding:13px;border-radius:14px;
   }
 
+  /* TRAININGSDAGEN */
+  .chip-row{display:flex;flex-wrap:wrap;gap:8px;}
+  .chip{
+    appearance:none;cursor:pointer;font-family:inherit;
+    border:1px solid var(--border);background:var(--bg);color:var(--text);
+    font-size:13.5px;font-weight:700;padding:9px 15px;border-radius:99px;
+  }
+  .chip.active{background:var(--accent);border-color:var(--accent);color:#F2FBF9;}
+  .chip.chip-add{border:1px dashed var(--accent);background:var(--accent-soft);color:var(--accent-ink);}
+  .day-hint{font-size:12.5px;color:var(--text-muted);margin:12px 0 0;line-height:1.45;}
+  .day-hint b{color:var(--text);}
+  .day-actions{display:flex;flex-wrap:wrap;gap:8px 18px;margin-top:14px;padding-top:12px;border-top:1px solid var(--border);}
+  .day-form{margin-top:14px;padding-top:14px;border-top:1px solid var(--border);}
+  .day-form label{display:flex;flex-direction:column;gap:6px;font-size:12.5px;font-weight:700;color:var(--text-muted);}
+  .hist-day{font-size:12.5px;font-weight:700;color:var(--accent-ink);margin-top:2px;}
+
   /* KALENDER */
   .cal-nav{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;}
   .cal-month-label{font-family:"Fraunces",serif;font-size:16.5px;font-weight:600;text-transform:capitalize;}
@@ -393,7 +409,7 @@
         <div class="hero">
           <div>
             <div class="hero-title">Klaar voor je training?</div>
-            <p><span id="schemaCount">9</span> oefeningen staan klaar in je schema.</p>
+            <p id="heroText">9 oefeningen staan klaar in je schema.</p>
           </div>
           <button class="btn-primary" data-nav="training">
             Start training
@@ -421,6 +437,7 @@
 
     <!-- TRAINING -->
     <section class="screen" id="screen-training">
+      <div id="trainingDayPicker"></div>
       <div class="stack" id="exerciseList"></div>
     </section>
 
@@ -472,11 +489,12 @@
 
     <!-- SCHEMA -->
     <section class="screen" id="screen-schema">
+      <div id="dayTabs" style="margin-bottom:14px;"></div>
       <div class="stack" id="schemaList"></div>
       <div class="stack" style="margin-top:14px;">
         <button class="action-link" id="addExerciseBtn">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
-          Oefening toevoegen
+          <span id="addExerciseLabel">Oefening toevoegen</span>
         </button>
       </div>
     </section>
@@ -550,6 +568,7 @@
   var HISTORY_KEY = 'gymapp_history_v1';
   var MEASURE_KEY = 'gymapp_measurements_v1';
   var PLANNED_KEY = 'gymapp_planned_v1';
+  var DAYS_KEY = 'gymapp_days_v1';
 
   function loadJSON(key, fallback){
     try{
@@ -584,21 +603,66 @@
       .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
   }
 
-  var schema = loadJSON(SCHEMA_KEY, null);
-  if (!schema || !schema.length){
-    schema = DEFAULT_SCHEMA.map(function(ex){ return Object.assign({}, ex); });
+  // ---------- Trainingsdagen ----------
+  // Elke dag heeft een eigen naam en een eigen lijst oefeningen. Wie één dag
+  // heeft (zoals "Full body") merkt niets van deze uitbreiding.
+  function newId(prefix){ return prefix + '-' + Math.random().toString(36).slice(2, 7); }
+
+  var days = loadJSON(DAYS_KEY, null);
+  if (!days || !days.length){
+    // Eerste keer met trainingsdagen: neem het bestaande schema over als één dag.
+    // Het oude schema blijft ongemoeid in de opslag staan (veilig terugdraaien).
+    var legacy = loadJSON(SCHEMA_KEY, null);
+    if (!legacy || !legacy.length){
+      legacy = DEFAULT_SCHEMA.map(function(ex){ return Object.assign({}, ex); });
+    }
+    days = [{ id: newId('dag'), name: 'Full body', exercises: legacy }];
   }
-  // vult ontbrekende velden aan (voor bestaand schema van vóór deze versie)
-  schema.forEach(function(ex){
-    if (!ex.id) ex.id = slugify(ex.name) + '-' + Math.random().toString(36).slice(2, 6);
-    if (ex.notitie === undefined) ex.notitie = null;
-    if (ex.apparaat === undefined) ex.apparaat = null;
+  // vult ontbrekende velden aan (voor oefeningen van vóór deze versie)
+  days.forEach(function(d){
+    if (!d.id) d.id = newId('dag');
+    if (!d.name) d.name = 'Dag';
+    if (!d.exercises) d.exercises = [];
+    d.exercises.forEach(function(ex){
+      if (!ex.id) ex.id = slugify(ex.name) + '-' + Math.random().toString(36).slice(2, 6);
+      if (ex.notitie === undefined) ex.notitie = null;
+      if (ex.apparaat === undefined) ex.apparaat = null;
+    });
   });
-  saveJSON(SCHEMA_KEY, schema);
+  function saveDays(){ saveJSON(DAYS_KEY, days); }
+  saveDays();
+
+  function dayById(id){
+    for (var i = 0; i < days.length; i++){ if (days[i].id === id) return days[i]; }
+    return null;
+  }
+  // De dag die na de laatst getrainde dag komt (in de volgorde van de dagen).
+  function suggestedDayId(){
+    if (days.length === 1) return days[0].id;
+    for (var i = history.length - 1; i >= 0; i--){
+      if (history[i].dayId){
+        for (var j = 0; j < days.length; j++){
+          if (days[j].id === history[i].dayId) return days[(j + 1) % days.length].id;
+        }
+        break; // die dag bestaat niet meer
+      }
+    }
+    return days[0].id;
+  }
+  // Naam van de dag bij een opgeslagen training (volgt een eventuele hernoeming).
+  function dayLabel(session){
+    var d = session.dayId ? dayById(session.dayId) : null;
+    return d ? d.name : (session.dayName || '');
+  }
+  var trainingDayId = null; // gekozen dag op het Training-scherm
+  var schemaDayId = days[0].id; // gekozen dag op het Schema-scherm
+  function trainingDay(){ return dayById(trainingDayId) || dayById(suggestedDayId()) || days[0]; }
+  function schemaDay(){ return dayById(schemaDayId) || days[0]; }
 
   var history = loadJSON(HISTORY_KEY, []);
   var measurements = loadJSON(MEASURE_KEY, []);
   var planned = loadJSON(PLANNED_KEY, []);
+  trainingDayId = suggestedDayId();
 
   function findLastFor(ex){
     for (var i = history.length - 1; i >= 0; i--){
@@ -675,15 +739,62 @@
   var exerciseListEl = document.getElementById('exerciseList');
   var trainingState = {}; // huidige (nog niet opgeslagen) invoer per oefening
 
+  var draftByEx = {}; // ingevulde (nog niet opgeslagen) waarden, per oefening-id, zodat wisselen van dag niets kwijtraakt
+
+  function snapshotTrainingDraft(){
+    trainingDay().exercises.forEach(function(ex, i){
+      if (trainingState[i]) draftByEx[ex.id] = trainingState[i];
+    });
+  }
+
+  function renderTrainingDayPicker(){
+    var el = document.getElementById('trainingDayPicker');
+    if (days.length < 2){ el.innerHTML = ''; return; }
+    var sug = suggestedDayId();
+    var sel = trainingDay().id;
+    el.innerHTML =
+      '<div class="card" style="margin-bottom:14px;">' +
+        '<p class="card-title">Welke dag train je?</p>' +
+        '<div class="chip-row">' +
+          days.map(function(d){
+            return '<button type="button" class="chip' + (d.id === sel ? ' active' : '') + '" data-train-day="' + d.id + '">' + escapeHtml(d.name) + '</button>';
+          }).join('') +
+        '</div>' +
+        '<p class="day-hint">Aan de beurt: <b>' + escapeHtml(dayById(sug).name) + '</b>' +
+          (sel !== sug ? ' — je hebt nu een andere dag gekozen.' : '.') + '</p>' +
+      '</div>';
+  }
+
+  document.getElementById('trainingDayPicker').addEventListener('click', function(e){
+    var b = e.target.closest('[data-train-day]');
+    if (!b || b.dataset.trainDay === trainingDay().id) return;
+    snapshotTrainingDraft();
+    trainingDayId = b.dataset.trainDay;
+    buildTrainingScreen();
+    document.querySelector('.screens').scrollTop = 0;
+  });
+
   function buildTrainingScreen(){
     exerciseListEl.innerHTML = '';
     trainingState = {};
+    renderTrainingDayPicker();
 
-    schema.forEach(function(ex, i){
+    var exList = trainingDay().exercises;
+    if (!exList.length){
+      exerciseListEl.innerHTML =
+        '<div class="card"><div class="empty">' +
+          '<div class="empty-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg></div>' +
+          '<p class="small muted" style="margin:0;">Deze dag heeft nog geen oefeningen. Voeg ze toe bij Schema.</p>' +
+        '</div></div>';
+      return;
+    }
+
+    exList.forEach(function(ex, i){
       var last = findLastFor(ex);
-      var startW = last ? last.ex.weight : 0;
-      var startR = last ? last.ex.reps : 0;
-      trainingState[i] = { w:startW, r:startR, done:{} };
+      var draft = draftByEx[ex.id];
+      var startW = draft ? draft.w : (last ? last.ex.weight : 0);
+      var startR = draft ? draft.r : (last ? last.ex.reps : 0);
+      trainingState[i] = { w:startW, r:startR, done: draft ? Object.assign({}, draft.done) : {} };
 
       var card = document.createElement('div');
       card.className = 'ex-card';
@@ -695,7 +806,7 @@
 
       var setsHtml = '';
       for (var s = 1; s <= ex.sets; s++){
-        setsHtml += '<div class="set-dot" data-ex="' + i + '" data-set="' + s + '">' + s + '</div>';
+        setsHtml += '<div class="set-dot' + (trainingState[i].done[s] ? ' done' : '') + '" data-ex="' + i + '" data-set="' + s + '">' + s + '</div>';
       }
 
       var prevLine = last
@@ -751,14 +862,18 @@
   });
 
   document.getElementById('saveTrainingBtn').addEventListener('click', function(){
-    var session = { date: todayISO(), exercises: [] };
-    schema.forEach(function(ex, i){
+    var day = trainingDay();
+    if (!day.exercises.length){ toast('Deze dag heeft nog geen oefeningen'); return; }
+    var session = { date: todayISO(), dayId: day.id, dayName: day.name, exercises: [] };
+    day.exercises.forEach(function(ex, i){
       var st = trainingState[i];
       var setsDone = Object.keys(st.done).filter(function(k){ return st.done[k]; }).length;
       session.exercises.push({ id: ex.id, name: ex.name, weight: st.w, reps: st.r, setsDone: setsDone, setsTarget: ex.sets });
     });
     history.push(session);
     saveJSON(HISTORY_KEY, history);
+    draftByEx = {};
+    trainingDayId = suggestedDayId(); // na deze training is de volgende dag aan de beurt
     var plannedIdx = planned.indexOf(session.date);
     if (plannedIdx !== -1){ planned.splice(plannedIdx, 1); saveJSON(PLANNED_KEY, planned); }
     toast('Training opgeslagen ✓');
@@ -771,7 +886,13 @@
 
   // ---------- Home ----------
   function renderHome(){
-    document.getElementById('schemaCount').textContent = schema.length;
+    var heroText = document.getElementById('heroText');
+    if (days.length > 1){
+      var nextDay = dayById(suggestedDayId());
+      heroText.textContent = 'Aan de beurt: ' + nextDay.name + ' · ' + nextDay.exercises.length + (nextDay.exercises.length === 1 ? ' oefening.' : ' oefeningen.');
+    } else {
+      heroText.textContent = days[0].exercises.length + (days[0].exercises.length === 1 ? ' oefening staat' : ' oefeningen staan') + ' klaar in je schema.';
+    }
     var box = document.getElementById('lastTrainingBox');
     if (!history.length){
       box.innerHTML =
@@ -786,7 +907,7 @@
         '<div class="last-training-row">' +
           '<div style="flex:1;">' +
             '<div class="last-training-date">' + formatDateNL(last.date) + '</div>' +
-            '<div class="small muted" style="margin-top:2px;">' + last.exercises.length + ' oefeningen · ' + totalSets + ' sets afgevinkt</div>' +
+            '<div class="small muted" style="margin-top:2px;">' + (dayLabel(last) && days.length > 1 ? escapeHtml(dayLabel(last)) + ' · ' : '') + last.exercises.length + ' oefeningen · ' + totalSets + ' sets afgevinkt</div>' +
           '</div>' +
           '<button class="link-btn" data-nav="historie">Bekijk' +
             '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>' +
@@ -825,7 +946,8 @@
       var session = history[i];
       var isEditing = editingSessionIndex === i;
       html += '<div class="card hist-card">' +
-        '<div class="hist-card-head"><div class="hist-date">' + formatDateNL(session.date) + '</div>' +
+        '<div class="hist-card-head"><div><div class="hist-date">' + formatDateNL(session.date) + '</div>' +
+        (days.length > 1 && dayLabel(session) ? '<div class="hist-day">' + escapeHtml(dayLabel(session)) + '</div>' : '') + '</div>' +
         (isEditing
           ? ''
           : '<button type="button" class="hist-edit-btn" data-edit-session="' + i + '">Bewerken</button>') +
@@ -1162,6 +1284,127 @@
   var addingNew = false;  // formulier voor nieuwe oefening open?
   var deleteConfirmId = null; // id waarvoor net op "verwijderen" is getikt
 
+  // ----- Trainingsdagen beheren (bovenaan het Schema-scherm) -----
+  var dayMode = null; // null | 'new' | 'rename' | 'delete'
+
+  function renderDayTabs(){
+    var el = document.getElementById('dayTabs');
+    var cur = schemaDay();
+    var idx = days.indexOf(cur);
+    var html =
+      '<div class="card">' +
+        '<p class="card-title">Trainingsdagen</p>' +
+        '<div class="chip-row">' +
+          days.map(function(d){
+            return '<button type="button" class="chip' + (d.id === cur.id ? ' active' : '') + '" data-schema-day="' + d.id + '">' + escapeHtml(d.name) + '</button>';
+          }).join('') +
+          '<button type="button" class="chip chip-add" data-day-add="1">+ Dag</button>' +
+        '</div>';
+
+    if (days.length > 1){
+      html += '<p class="day-hint">Na elke training stelt de app de volgende dag voor, in deze volgorde: <b>' +
+        days.map(function(d){ return escapeHtml(d.name); }).join(' → ') + '</b>, en daarna weer van voren af aan.</p>';
+    } else {
+      html += '<p class="day-hint">Train je op aparte dagen, bijvoorbeeld Push, Pull en Legs? Voeg met “+ Dag” een trainingsdag toe met een eigen lijst oefeningen.</p>';
+    }
+
+    if (dayMode === 'new' || dayMode === 'rename'){
+      html +=
+        '<div class="day-form form-grid">' +
+          '<label style="grid-column:1 / -1;">' + (dayMode === 'new' ? 'Naam van de nieuwe dag' : 'Nieuwe naam voor deze dag') +
+            '<input type="text" id="dayNameInput" maxlength="30" placeholder="bv. Push" value="' + (dayMode === 'rename' ? escapeHtml(cur.name) : '') + '"></label>' +
+          '<div style="grid-column:1 / -1;display:flex;gap:10px;">' +
+            '<button type="button" class="btn-secondary" data-day-cancel="1" style="flex:1;">Annuleren</button>' +
+            '<button type="button" class="btn-save" data-day-save="' + dayMode + '" style="flex:1;">' + (dayMode === 'new' ? 'Toevoegen' : 'Opslaan') + '</button>' +
+          '</div>' +
+        '</div>';
+    } else if (dayMode === 'delete'){
+      html +=
+        '<div class="day-form">' +
+          '<p class="small" style="margin:0 0 12px;">Dag <b>' + escapeHtml(cur.name) + '</b> en de ' + cur.exercises.length +
+            ' oefeningen daarin verwijderen? Je opgeslagen trainingen in Historie blijven bewaard.</p>' +
+          '<div style="display:flex;gap:10px;">' +
+            '<button type="button" class="btn-secondary" data-day-cancel="1" style="flex:1;">Nee</button>' +
+            '<button type="button" class="btn-save" data-day-confirm-delete="1" style="flex:1;">Ja, verwijderen</button>' +
+          '</div>' +
+        '</div>';
+    } else {
+      html +=
+        '<div class="day-actions">' +
+          '<button type="button" class="link-btn" data-day-rename="1">Naam wijzigen</button>' +
+          (idx > 0 ? '<button type="button" class="link-btn" data-day-move="-1">← Eerder</button>' : '') +
+          (idx < days.length - 1 ? '<button type="button" class="link-btn" data-day-move="1">Later →</button>' : '') +
+          (days.length > 1 ? '<button type="button" class="link-btn" data-day-delete="1" style="color:var(--text-muted);">Dag verwijderen</button>' : '') +
+        '</div>';
+    }
+    html += '</div>';
+    el.innerHTML = html;
+  }
+
+  function afterDaysChange(){
+    if (!dayById(trainingDayId)) trainingDayId = suggestedDayId();
+    buildSchemaScreen();
+    buildTrainingScreen();
+    renderHome();
+    renderHistorie();
+  }
+
+  document.getElementById('dayTabs').addEventListener('click', function(e){
+    var el;
+    if ((el = e.target.closest('[data-schema-day]'))){
+      schemaDayId = el.dataset.schemaDay;
+      dayMode = null; editingId = null; addingNew = false; deleteConfirmId = null;
+      buildSchemaScreen(); return;
+    }
+    if (e.target.closest('[data-day-add]')){
+      dayMode = 'new'; buildSchemaScreen();
+      var inp = document.getElementById('dayNameInput'); if (inp) inp.focus();
+      return;
+    }
+    if (e.target.closest('[data-day-rename]')){
+      dayMode = 'rename'; buildSchemaScreen();
+      var inp2 = document.getElementById('dayNameInput'); if (inp2) inp2.focus();
+      return;
+    }
+    if (e.target.closest('[data-day-delete]')){ dayMode = 'delete'; buildSchemaScreen(); return; }
+    if (e.target.closest('[data-day-cancel]')){ dayMode = null; buildSchemaScreen(); return; }
+
+    if ((el = e.target.closest('[data-day-save]'))){
+      var name = document.getElementById('dayNameInput').value.trim();
+      if (!name){ toast('Vul een naam in'); return; }
+      if (el.dataset.daySave === 'new'){
+        var nd = { id: newId('dag'), name: name, exercises: [] };
+        days.push(nd);
+        schemaDayId = nd.id;
+        toast('Dag toegevoegd ✓');
+      } else {
+        schemaDay().name = name;
+        toast('Naam opgeslagen ✓');
+      }
+      dayMode = null; editingId = null; addingNew = false; deleteConfirmId = null;
+      saveDays(); afterDaysChange(); return;
+    }
+    if (e.target.closest('[data-day-confirm-delete]')){
+      if (days.length < 2) return;
+      var cur = schemaDay(), at = days.indexOf(cur);
+      days.splice(at, 1);
+      schemaDayId = days[Math.max(0, at - 1)].id;
+      if (trainingDayId === cur.id) trainingDayId = null;
+      dayMode = null; editingId = null; addingNew = false; deleteConfirmId = null;
+      saveDays();
+      trainingDayId = trainingDayId || suggestedDayId();
+      toast('Dag verwijderd');
+      afterDaysChange(); return;
+    }
+    if ((el = e.target.closest('[data-day-move]'))){
+      var from = days.indexOf(schemaDay()), to = from + parseInt(el.dataset.dayMove, 10);
+      if (to < 0 || to >= days.length) return;
+      var moved = days.splice(from, 1)[0];
+      days.splice(to, 0, moved);
+      saveDays(); afterDaysChange(); return;
+    }
+  });
+
   function schemaFormHtml(ex, prefix){
     return (
       '<div class="form-grid">' +
@@ -1185,8 +1428,20 @@
 
   function buildSchemaScreen(){
     schemaListEl.innerHTML = '';
+    renderDayTabs();
+    document.getElementById('addExerciseLabel').textContent =
+      days.length > 1 ? 'Oefening toevoegen aan ' + schemaDay().name : 'Oefening toevoegen';
 
-    schema.forEach(function(ex){
+    var sdExercises = schemaDay().exercises;
+    if (!sdExercises.length && !addingNew){
+      schemaListEl.innerHTML =
+        '<div class="card"><div class="empty">' +
+          '<div class="empty-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg></div>' +
+          '<p class="small muted" style="margin:0;">Deze dag heeft nog geen oefeningen. Voeg er hieronder een toe.</p>' +
+        '</div></div>';
+    }
+
+    sdExercises.forEach(function(ex){
       var row = document.createElement('div');
       row.className = 'card';
 
@@ -1264,12 +1519,12 @@
     }
     if ((el = e.target.closest('[data-save-edit]'))){
       var id = el.dataset.saveEdit;
-      var ex = schema.find(function(x){ return x.id === id; });
+      var ex = schemaDay().exercises.find(function(x){ return x.id === id; });
       if (!ex) return;
       var vals = readFormValues('e');
       if (!vals.name){ toast('Vul een naam in'); return; }
       Object.assign(ex, vals);
-      saveJSON(SCHEMA_KEY, schema);
+      saveDays();
       editingId = null;
       toast('Oefening opgeslagen ✓');
       buildSchemaScreen();
@@ -1285,8 +1540,9 @@
     }
     if ((el = e.target.closest('[data-confirm-delete]'))){
       var delId = el.dataset.confirmDelete;
-      schema = schema.filter(function(x){ return x.id !== delId; });
-      saveJSON(SCHEMA_KEY, schema);
+      var sd = schemaDay();
+      sd.exercises = sd.exercises.filter(function(x){ return x.id !== delId; });
+      saveDays();
       editingId = null; deleteConfirmId = null;
       toast('Oefening verwijderd');
       buildSchemaScreen();
@@ -1301,8 +1557,8 @@
       var nv = readFormValues('n');
       if (!nv.name){ toast('Vul een naam in'); return; }
       nv.id = slugify(nv.name) + '-' + Math.random().toString(36).slice(2, 6);
-      schema.push(nv);
-      saveJSON(SCHEMA_KEY, schema);
+      schemaDay().exercises.push(nv);
+      saveDays();
       addingNew = false;
       toast('Oefening toegevoegd ✓');
       buildSchemaScreen();
