@@ -239,6 +239,43 @@
     background:var(--accent);border-color:var(--accent);color:#fff;
   }
 
+  /* SETS PER OEFENING + RUSTTIMER */
+  .set-head,.set-row{display:grid;grid-template-columns:78px 1fr 1fr 42px;gap:8px;align-items:center;}
+  .set-head{font-size:11.5px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;padding:4px 0;}
+  .set-head span:nth-child(2),.set-head span:nth-child(3){text-align:center;}
+  .set-row{padding:7px 0;border-top:1px solid var(--border);}
+  .set-no{font-family:"Fraunces",serif;font-size:17px;font-weight:600;line-height:1.1;}
+  .set-sub{font-size:10.5px;color:var(--text-muted);white-space:nowrap;margin-top:2px;min-height:13px;font-variant-numeric:tabular-nums;}
+  .set-sub.done{color:var(--accent-ink);font-weight:700;}
+  .set-row .num-input{width:100%;min-width:0;padding:10px 4px;}
+  .set-row.done .num-input{background:var(--accent-soft);border-color:transparent;}
+  .set-check{
+    width:42px;height:42px;border-radius:50%;padding:0;cursor:pointer;
+    border:1.5px solid var(--border);background:var(--bg);color:var(--text-muted);
+    display:flex;align-items:center;justify-content:center;
+  }
+  .set-check.done{background:var(--accent);border-color:var(--accent);color:#fff;}
+  .set-tools{display:flex;gap:18px;margin-top:4px;padding-top:10px;border-top:1px solid var(--border);}
+
+  .rest-bar{
+    flex-shrink:0;display:flex;align-items:center;gap:8px;
+    background:#2E8158;color:#fff;padding:10px 14px;
+  }
+  .rest-bar.finished{background:#A63860;}
+  .rest-mid{flex:1;text-align:center;}
+  .rest-label{display:block;font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;opacity:.9;margin-bottom:2px;}
+  .rest-time{font-family:"Fraunces",serif;font-size:30px;font-weight:600;font-variant-numeric:tabular-nums;line-height:1;}
+  .rest-adj{
+    appearance:none;cursor:pointer;font-family:inherit;
+    border:1.5px solid rgba(255,255,255,.75);background:transparent;color:#fff;
+    font-weight:700;font-size:13px;padding:9px 8px;border-radius:10px;min-width:52px;
+  }
+  .rest-skip{
+    appearance:none;cursor:pointer;font-family:inherit;border:none;
+    background:#fff;color:#1d5a3d;font-weight:700;font-size:13px;padding:10px 12px;border-radius:10px;
+  }
+  .rest-bar.finished .rest-skip{color:#7A2A48;}
+
   .save-bar{
     flex-shrink:0;
     background:var(--bg);
@@ -527,6 +564,13 @@
 
   </main>
 
+  <div class="rest-bar" id="restBar" style="display:none;">
+    <button type="button" class="rest-adj" data-rest="-15">−15s</button>
+    <div class="rest-mid"><span class="rest-label" id="restLabel">Rust</span><span class="rest-time" id="restTime">01:30</span></div>
+    <button type="button" class="rest-adj" data-rest="15">+15s</button>
+    <button type="button" class="rest-skip" data-rest="skip">Overslaan</button>
+  </div>
+
   <div class="save-bar" id="trainingSaveBar" style="display:none;">
     <button class="btn-save" id="saveTrainingBtn">Training opslaan</button>
   </div>
@@ -729,6 +773,7 @@
     document.querySelector('.screens').scrollTop = 0;
     document.getElementById('trainingSaveBar').style.display = (name === 'training') ? 'block' : 'none';
     if (name === 'kalender') renderKalender();
+    updateRestVisibility();
   }
   document.addEventListener('click', function(e){
     var el = e.target.closest('[data-nav]');
@@ -737,14 +782,76 @@
 
   // ---------- Trainingsscherm ----------
   var exerciseListEl = document.getElementById('exerciseList');
-  var trainingState = {}; // huidige (nog niet opgeslagen) invoer per oefening
+  var DRAFT_KEY = 'gymapp_draft_v1';
+  var DRAFT_MAX_AGE = 18 * 3600 * 1000; // een onafgemaakte training blijft 18 uur bewaard
+  var trainingState = {}; // per oefening-index: { n: aantal sets, sets: { 1:{w,r,done,touched}, ... } }
+  var lastByIdx = {};     // vorige keer, per oefening-index (alleen om te tonen)
+  var draftByEx = {};     // onafgemaakte invoer per oefening-id (blijft bewaard, ook na afsluiten van de app)
 
-  var draftByEx = {}; // ingevulde (nog niet opgeslagen) waarden, per oefening-id, zodat wisselen van dag niets kwijtraakt
+  (function loadDraft(){
+    var d = loadJSON(DRAFT_KEY, null);
+    if (d && d.byEx && d.ts && (Date.now() - d.ts) < DRAFT_MAX_AGE){
+      draftByEx = d.byEx;
+      if (d.dayId && dayById(d.dayId)) trainingDayId = d.dayId;
+    }
+  })();
+
+  function fmtNum(n){ return String(n).replace('.', ','); }
+  function shortSet(w, r){ return w > 0 ? fmtNum(w) + '×' + r : r + ' reps'; }
+  function longSet(w, r){ return w > 0 ? fmtNum(w) + ' kg × ' + r : r + ' reps'; }
+
+  // zwaarste set (bij gelijk gewicht: meeste reps) — voor de oude weight/reps-velden
+  function topSet(sets){
+    var best = null;
+    sets.forEach(function(x){
+      if (!best || x.w > best.w || (x.w === best.w && x.r > best.r)) best = x;
+    });
+    return best;
+  }
+  // waarde van set s uit de vorige training (valt terug op de laatste set, of op de oude weight/reps)
+  function prevSetFor(last, s){
+    if (!last) return null;
+    var e = last.ex;
+    if (e.sets && e.sets.length) return e.sets[Math.min(s, e.sets.length) - 1];
+    if (e.weight || e.reps) return { w: e.weight || 0, r: e.reps || 0 };
+    return null;
+  }
+  function prevSummary(last){
+    var e = last.ex;
+    if (e.sets && e.sets.length) return e.sets.map(function(x){ return shortSet(x.w, x.r); }).join(' · ') + ' <span style="font-style:normal;">(kg × reps)</span>';
+    return e.weight + ' kg × ' + e.reps + ' reps';
+  }
+
+  function restSecondsFor(ex){
+    var t = String(ex.rust || '').toLowerCase();
+    var m = t.match(/(\d+)\s*:\s*(\d+)/);
+    if (m) return clampRest(parseInt(m[1], 10) * 60 + parseInt(m[2], 10));
+    m = t.match(/(\d+)\s*(min|m)\b/);
+    if (m) return clampRest(parseInt(m[1], 10) * 60);
+    m = t.match(/(\d+)/);
+    if (m) return clampRest(parseInt(m[1], 10));
+    return 90;
+  }
+  function clampRest(n){ return Math.min(600, Math.max(10, n)); }
 
   function snapshotTrainingDraft(){
     trainingDay().exercises.forEach(function(ex, i){
       if (trainingState[i]) draftByEx[ex.id] = trainingState[i];
     });
+  }
+  function persistDraft(){
+    snapshotTrainingDraft();
+    var any = false;
+    Object.keys(draftByEx).forEach(function(id){
+      var st = draftByEx[id];
+      Object.keys(st.sets).forEach(function(k){ if (st.sets[k].done || st.sets[k].touched) any = true; });
+    });
+    if (!any){ try { localStorage.removeItem(DRAFT_KEY); } catch(e){} return; }
+    saveJSON(DRAFT_KEY, { ts: Date.now(), dayId: trainingDay().id, byEx: draftByEx });
+  }
+  function clearDraft(){
+    draftByEx = {};
+    try { localStorage.removeItem(DRAFT_KEY); } catch(e){}
   }
 
   function renderTrainingDayPicker(){
@@ -774,9 +881,79 @@
     document.querySelector('.screens').scrollTop = 0;
   });
 
+  function makeState(ex, last){
+    var draft = draftByEx[ex.id];
+    var base = parseInt(ex.sets, 10) || 3;
+    var st = { n: draft && draft.n ? draft.n : base, sets: {} };
+    if (draft){
+      Object.keys(draft.sets).forEach(function(k){ st.sets[k] = Object.assign({}, draft.sets[k]); });
+    }
+    for (var s = 1; s <= st.n; s++){
+      if (!st.sets[s]){
+        var p = prevSetFor(last, s);
+        st.sets[s] = { w: p ? p.w : null, r: p ? p.r : null, done: false, touched: false };
+      }
+    }
+    return st;
+  }
+
+  var CHECK_SVG = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>';
+
+  function exCardHtml(i){
+    var ex = trainingDay().exercises[i];
+    var st = trainingState[i];
+    var last = lastByIdx[i];
+
+    var pills = '';
+    if (ex.tempo) pills += '<span class="pill">tempo ' + ex.tempo + '</span>';
+    if (ex.rust) pills += '<span class="pill">' + ex.rust + ' rust</span>';
+
+    var prevLine = last
+      ? 'Vorige keer (' + formatDateNL(last.date) + '): <b>' + prevSummary(last) + '</b>'
+      : 'Eerste keer — nog geen eerdere data';
+
+    var rows = '';
+    for (var s = 1; s <= st.n; s++){
+      var set = st.sets[s];
+      var prev = prevSetFor(last, s);
+      var sub = set.done ? longSet(set.w, set.r) : (prev ? 'vorige ' + shortSet(prev.w, prev.r) : '');
+      rows +=
+        '<div class="set-row' + (set.done ? ' done' : '') + '">' +
+          '<div><div class="set-no">' + s + '</div><div class="set-sub' + (set.done ? ' done' : '') + '">' + sub + '</div></div>' +
+          '<input type="number" inputmode="decimal" step="0.25" class="num-input set-in" data-role="w" data-ex="' + i + '" data-set="' + s + '" placeholder="kg" value="' + (set.w == null ? '' : set.w) + '">' +
+          '<input type="number" inputmode="numeric" step="1" class="num-input set-in" data-role="r" data-ex="' + i + '" data-set="' + s + '" placeholder="reps" value="' + (set.r == null ? '' : set.r) + '">' +
+          '<button type="button" class="set-check' + (set.done ? ' done' : '') + '" data-check="1" data-ex="' + i + '" data-set="' + s + '" aria-label="Set ' + s + ' opslaan">' + CHECK_SVG + '</button>' +
+        '</div>';
+    }
+
+    var lastDone = st.sets[st.n] && st.sets[st.n].done;
+    return (
+      '<div class="ex-head">' +
+        '<div>' +
+          '<div class="ex-name">' + escapeHtml(ex.name) + '</div>' +
+          '<div class="ex-target">' + ex.sets + ' sets · ' + ex.reps + ' reps</div>' +
+        '</div>' +
+        '<div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end;">' + pills + '</div>' +
+      '</div>' +
+      '<p class="ex-prev">' + prevLine + '</p>' +
+      '<div class="set-head"><span>Set</span><span>Kg</span><span>Reps</span><span></span></div>' +
+      rows +
+      '<div class="set-tools">' +
+        '<button type="button" class="link-btn" data-add-set="' + i + '">+ Extra set</button>' +
+        (st.n > 1 && !lastDone ? '<button type="button" class="link-btn" data-remove-set="' + i + '" style="color:var(--text-muted);">− Laatste set weg</button>' : '') +
+      '</div>'
+    );
+  }
+
+  function renderExCard(i){
+    var card = exerciseListEl.children[i];
+    if (card) card.innerHTML = exCardHtml(i);
+  }
+
   function buildTrainingScreen(){
     exerciseListEl.innerHTML = '';
     trainingState = {};
+    lastByIdx = {};
     renderTrainingDayPicker();
 
     var exList = trainingDay().exercises;
@@ -791,75 +968,156 @@
 
     exList.forEach(function(ex, i){
       var last = findLastFor(ex);
-      var draft = draftByEx[ex.id];
-      var startW = draft ? draft.w : (last ? last.ex.weight : 0);
-      var startR = draft ? draft.r : (last ? last.ex.reps : 0);
-      trainingState[i] = { w:startW, r:startR, done: draft ? Object.assign({}, draft.done) : {} };
-
+      lastByIdx[i] = last;
+      trainingState[i] = makeState(ex, last);
       var card = document.createElement('div');
       card.className = 'ex-card';
-
-      var targetBits = [ex.sets + ' sets', ex.reps + ' reps'];
-      var pills = '';
-      if (ex.tempo) pills += '<span class="pill">tempo ' + ex.tempo + '</span>';
-      if (ex.rust) pills += '<span class="pill">' + ex.rust + ' rust</span>';
-
-      var setsHtml = '';
-      for (var s = 1; s <= ex.sets; s++){
-        setsHtml += '<div class="set-dot' + (trainingState[i].done[s] ? ' done' : '') + '" data-ex="' + i + '" data-set="' + s + '">' + s + '</div>';
-      }
-
-      var prevLine = last
-        ? 'Vorige keer (' + formatDateNL(last.date) + '): <b>' + last.ex.weight + ' kg × ' + last.ex.reps + ' reps</b>'
-        : 'Eerste keer — nog geen eerdere data';
-
-      card.innerHTML =
-        '<div class="ex-head">' +
-          '<div>' +
-            '<div class="ex-name">' + escapeHtml(ex.name) + '</div>' +
-            '<div class="ex-target">' + targetBits.join(' · ') + '</div>' +
-          '</div>' +
-          '<div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end;">' + pills + '</div>' +
-        '</div>' +
-        '<p class="ex-prev">' + prevLine + '</p>' +
-        '<div class="stepper-row">' +
-          '<span class="stepper-label">Gewicht</span>' +
-          '<div class="num-field">' +
-            '<input type="number" inputmode="decimal" step="0.25" class="num-input" data-role="w" data-ex="' + i + '" id="w-' + i + '" value="' + startW + '">' +
-            '<span class="num-unit">kg</span>' +
-          '</div>' +
-        '</div>' +
-        '<div class="stepper-row">' +
-          '<span class="stepper-label">Reps</span>' +
-          '<div class="num-field">' +
-            '<input type="number" inputmode="numeric" step="1" class="num-input" data-role="r" data-ex="' + i + '" id="r-' + i + '" value="' + startR + '">' +
-          '</div>' +
-        '</div>' +
-        '<div class="sets-row">' + setsHtml + '</div>';
-
       exerciseListEl.appendChild(card);
+      card.innerHTML = exCardHtml(i);
     });
   }
 
+  function toggleSet(i, s){
+    var st = trainingState[i], set = st.sets[s], ex = trainingDay().exercises[i];
+    if (!set.done){
+      if (!(set.r > 0)){
+        toast('Vul eerst de reps in');
+        var rin = exerciseListEl.querySelector('input[data-role="r"][data-ex="' + i + '"][data-set="' + s + '"]');
+        if (rin) rin.focus();
+        return;
+      }
+      set.w = set.w || 0;
+      set.done = true; set.touched = true;
+      // volgende set die nog leeg/onaangeraakt is: alvast voorinvullen met deze waarden
+      var nxt = st.sets[s + 1];
+      if (nxt && !nxt.done && !nxt.touched){ nxt.w = set.w; nxt.r = set.r; }
+      persistDraft();
+      renderExCard(i);
+      startRest(restSecondsFor(ex));
+      toast('Set ' + s + ' opgeslagen ✓');
+    } else {
+      set.done = false;
+      persistDraft();
+      renderExCard(i);
+    }
+  }
+
   exerciseListEl.addEventListener('click', function(e){
-    var dot = e.target.closest('.set-dot');
-    if (dot){
-      dot.classList.toggle('done');
-      var i = dot.dataset.ex, s = dot.dataset.set;
-      trainingState[i].done[s] = dot.classList.contains('done');
+    var chk = e.target.closest('[data-check]');
+    if (chk){ toggleSet(chk.dataset.ex, parseInt(chk.dataset.set, 10)); return; }
+    var add = e.target.closest('[data-add-set]');
+    if (add){
+      var i = add.dataset.addSet, st = trainingState[i];
+      var prevS = st.sets[st.n];
+      st.n += 1;
+      st.sets[st.n] = { w: prevS ? prevS.w : null, r: prevS ? prevS.r : null, done: false, touched: false };
+      persistDraft(); renderExCard(i); return;
+    }
+    var rem = e.target.closest('[data-remove-set]');
+    if (rem){
+      var j = rem.dataset.removeSet, st2 = trainingState[j];
+      if (st2.n > 1 && !st2.sets[st2.n].done){
+        delete st2.sets[st2.n]; st2.n -= 1;
+        persistDraft(); renderExCard(j);
+      }
     }
   });
 
   exerciseListEl.addEventListener('input', function(e){
-    var inp = e.target.closest('.num-input');
+    var inp = e.target.closest('.set-in');
     if (!inp) return;
-    var idx = inp.dataset.ex;
-    var st = trainingState[idx];
-    var num = parseFloat(inp.value);
-    if (isNaN(num)) num = 0;
-    if (inp.dataset.role === 'w') st.w = Math.max(0, num);
-    if (inp.dataset.role === 'r') st.r = Math.max(0, num);
+    var st = trainingState[inp.dataset.ex];
+    var set = st && st.sets[inp.dataset.set];
+    if (!set) return;
+    var num = parseFloat(String(inp.value).replace(',', '.'));
+    var val = isNaN(num) ? null : Math.max(0, num);
+    if (inp.dataset.role === 'w') set.w = val; else set.r = val;
+    set.touched = true;
+    if (set.done){
+      var row = inp.closest('.set-row');
+      var sub = row && row.querySelector('.set-sub');
+      if (sub) sub.textContent = longSet(set.w || 0, set.r || 0);
+    }
+    persistDraft();
   });
+
+  // ---------- Rusttimer ----------
+  var restEnd = 0, restTimerId = null, restFinished = false, audioCtx = null;
+
+  function fmtClock(sec){
+    var m = Math.floor(sec / 60), s = sec % 60;
+    return String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0');
+  }
+  function ensureAudio(){
+    try {
+      var AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return;
+      if (!audioCtx) audioCtx = new AC();
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+    } catch(e){}
+  }
+  function beep(){
+    try {
+      if (!audioCtx) return;
+      [0, 0.28, 0.56].forEach(function(delay){
+        var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+        o.type = 'sine'; o.frequency.value = 880;
+        o.connect(g); g.connect(audioCtx.destination);
+        var t0 = audioCtx.currentTime + delay;
+        g.gain.setValueAtTime(0.0001, t0);
+        g.gain.exponentialRampToValueAtTime(0.35, t0 + 0.02);
+        g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.2);
+        o.start(t0); o.stop(t0 + 0.22);
+      });
+    } catch(e){}
+    try { if (navigator.vibrate) navigator.vibrate([200, 100, 200]); } catch(e){}
+  }
+  function updateRestVisibility(){
+    var bar = document.getElementById('restBar');
+    if (!bar) return;
+    var onTraining = document.getElementById('screen-training').classList.contains('active');
+    bar.style.display = (restEnd && onTraining) ? 'flex' : 'none';
+  }
+  function stopRest(){
+    restEnd = 0; restFinished = false;
+    if (restTimerId){ clearInterval(restTimerId); restTimerId = null; }
+    updateRestVisibility();
+  }
+  function tickRest(){
+    if (!restEnd) return;
+    var bar = document.getElementById('restBar');
+    var leftMs = restEnd - Date.now();
+    if (leftMs > 0){
+      restFinished = false;
+      bar.classList.remove('finished');
+      document.getElementById('restLabel').textContent = 'Rust';
+      document.getElementById('restTime').textContent = fmtClock(Math.ceil(leftMs / 1000));
+    } else {
+      if (!restFinished){ restFinished = true; beep(); }
+      bar.classList.add('finished');
+      document.getElementById('restLabel').textContent = 'Klaar — volgende set!';
+      document.getElementById('restTime').textContent = '00:00';
+      if (-leftMs > 20000) stopRest(); // na 20 sec vanzelf weg
+    }
+  }
+  function startRest(sec){
+    ensureAudio();
+    restEnd = Date.now() + sec * 1000;
+    restFinished = false;
+    if (!restTimerId) restTimerId = setInterval(tickRest, 250);
+    updateRestVisibility();
+    tickRest();
+  }
+  document.getElementById('restBar').addEventListener('click', function(e){
+    var b = e.target.closest('[data-rest]');
+    if (!b) return;
+    if (b.dataset.rest === 'skip'){ stopRest(); return; }
+    var delta = parseInt(b.dataset.rest, 10) * 1000;
+    restEnd += delta;
+    if (restEnd < Date.now()) restEnd = Date.now(); // min 15s eraf kan niet onder 0
+    tickRest();
+  });
+  document.addEventListener('visibilitychange', function(){ if (!document.hidden) tickRest(); });
 
   document.getElementById('saveTrainingBtn').addEventListener('click', function(){
     var day = trainingDay();
@@ -867,12 +1125,23 @@
     var session = { date: todayISO(), dayId: day.id, dayName: day.name, exercises: [] };
     day.exercises.forEach(function(ex, i){
       var st = trainingState[i];
-      var setsDone = Object.keys(st.done).filter(function(k){ return st.done[k]; }).length;
-      session.exercises.push({ id: ex.id, name: ex.name, weight: st.w, reps: st.r, setsDone: setsDone, setsTarget: ex.sets });
+      var logged = [];
+      for (var s = 1; s <= st.n; s++){
+        var set = st.sets[s];
+        if (set && set.done) logged.push({ w: set.w || 0, r: set.r || 0 });
+      }
+      if (!logged.length) return;
+      var top = topSet(logged);
+      session.exercises.push({
+        id: ex.id, name: ex.name, weight: top.w, reps: top.r,
+        sets: logged, setsDone: logged.length, setsTarget: Math.max(parseInt(ex.sets, 10) || logged.length, logged.length)
+      });
     });
+    if (!session.exercises.length){ toast('Vink eerst minstens één set af'); return; }
     history.push(session);
     saveJSON(HISTORY_KEY, history);
-    draftByEx = {};
+    clearDraft();
+    stopRest();
     trainingDayId = suggestedDayId(); // na deze training is de volgende dag aan de beurt
     var plannedIdx = planned.indexOf(session.date);
     if (plannedIdx !== -1){ planned.splice(plannedIdx, 1); saveJSON(PLANNED_KEY, planned); }
@@ -955,6 +1224,20 @@
 
       if (isEditing){
         session.exercises.forEach(function(e, ei){
+          if (e.sets && e.sets.length){
+            html += '<div class="hist-row-edit"><span class="hist-edit-name">' + escapeHtml(e.name) + '</span>';
+            e.sets.forEach(function(x, sj){
+              html += '<div class="hist-edit-fields">' +
+                '<span class="num-unit" style="min-width:42px;">Set ' + (sj + 1) + '</span>' +
+                '<input type="number" inputmode="decimal" step="0.25" class="num-input num-input-sm" data-hf="sw" data-sj="' + sj + '" data-si="' + i + '" data-ei="' + ei + '" value="' + x.w + '">' +
+                '<span class="num-unit">kg</span>' +
+                '<input type="number" inputmode="numeric" step="1" class="num-input num-input-sm" data-hf="sr" data-sj="' + sj + '" data-si="' + i + '" data-ei="' + ei + '" value="' + x.r + '">' +
+                '<span class="num-unit">reps</span>' +
+              '</div>';
+            });
+            html += '</div>';
+            return;
+          }
           html += '<div class="hist-row-edit">' +
             '<span class="hist-edit-name">' + escapeHtml(e.name) + '</span>' +
             '<div class="hist-edit-fields">' +
@@ -980,8 +1263,14 @@
         '</div>';
       } else {
         session.exercises.forEach(function(e){
-          html += '<div class="hist-row"><span class="hist-ex">' + escapeHtml(e.name) + '</span>' +
-            '<span class="hist-vals">' + e.weight + ' kg × ' + e.reps + ' · ' + e.setsDone + '/' + e.setsTarget + ' sets</span></div>';
+          if (e.sets && e.sets.length){
+            html += '<div class="hist-row"><span class="hist-ex">' + escapeHtml(e.name) + '</span>' +
+              '<span class="hist-vals" style="white-space:normal;text-align:right;">' +
+              e.sets.map(function(x){ return shortSet(x.w, x.r); }).join(' · ') + '</span></div>';
+          } else {
+            html += '<div class="hist-row"><span class="hist-ex">' + escapeHtml(e.name) + '</span>' +
+              '<span class="hist-vals">' + e.weight + ' kg × ' + e.reps + ' · ' + e.setsDone + '/' + e.setsTarget + ' sets</span></div>';
+          }
         });
       }
       html += '</div>';
@@ -1016,6 +1305,16 @@
         if (inp.dataset.hf === 'w' && !isNaN(num)) ex.weight = Math.max(0, num);
         if (inp.dataset.hf === 'r' && !isNaN(num)) ex.reps = Math.max(0, num);
         if (inp.dataset.hf === 's' && !isNaN(num)) ex.setsDone = Math.min(ex.setsTarget, Math.max(0, Math.round(num)));
+        if ((inp.dataset.hf === 'sw' || inp.dataset.hf === 'sr') && !isNaN(num) && ex.sets){
+          var setObj = ex.sets[parseInt(inp.dataset.sj, 10)];
+          if (setObj){ if (inp.dataset.hf === 'sw') setObj.w = Math.max(0, num); else setObj.r = Math.max(0, num); }
+        }
+      });
+      session.exercises.forEach(function(ex){
+        if (ex.sets && ex.sets.length){
+          var t = topSet(ex.sets);
+          ex.weight = t.w; ex.reps = t.r; ex.setsDone = ex.sets.length;
+        }
       });
       saveJSON(HISTORY_KEY, history);
       editingSessionIndex = null;
